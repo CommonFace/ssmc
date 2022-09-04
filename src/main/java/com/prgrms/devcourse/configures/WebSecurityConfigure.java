@@ -1,10 +1,16 @@
 package com.prgrms.devcourse.configures;
 
+import com.prgrms.devcourse.jwt.Jwt;
+import com.prgrms.devcourse.jwt.JwtAuthenticationFilter;
+import com.prgrms.devcourse.jwt.JwtAuthenticationProvider;
+import com.prgrms.devcourse.jwt.JwtSecurityContextRepository;
 import com.prgrms.devcourse.user.UserService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.builders.WebSecurity;
@@ -16,7 +22,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.access.AccessDeniedHandler;
-import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import org.springframework.security.web.context.SecurityContextRepository;
 
 import javax.servlet.http.HttpServletResponse;
 
@@ -26,20 +32,15 @@ public class WebSecurityConfigure extends WebSecurityConfigurerAdapter {
 
     private final Logger log = LoggerFactory.getLogger(getClass());
 
-    private final UserService userService;
+    private final JwtConfigure jwtConfigure;
 
-    public WebSecurityConfigure(UserService userService) {
-        this.userService = userService;
+    public WebSecurityConfigure(JwtConfigure jwtConfigure) {
+        this.jwtConfigure = jwtConfigure;
     }
 
     @Override
     public void configure(WebSecurity web) {
         web.ignoring().antMatchers("/assets/**", "/h2-console/**");
-    }
-
-    @Override
-    protected void configure(AuthenticationManagerBuilder auth) throws Exception {
-        auth.userDetailsService(userService);
     }
 
     @Bean
@@ -61,43 +62,89 @@ public class WebSecurityConfigure extends WebSecurityConfigurerAdapter {
         return new BCryptPasswordEncoder();
     }
 
+    @Bean
+    public Jwt jwt() {
+        return new Jwt(
+                jwtConfigure.getIssuer(),
+                jwtConfigure.getClientSecret(),
+                jwtConfigure.getExpirySeconds()
+        );
+    }
+
+    @Bean
+    public JwtAuthenticationProvider jwtAuthenticationProvider(UserService userService, Jwt jwt) {
+        return new JwtAuthenticationProvider(jwt, userService);
+    }
+
+    @Bean
+    @Override
+    public AuthenticationManager authenticationManagerBean() throws Exception {
+        return super.authenticationManagerBean();
+    }
+
+    @Autowired
+    public void configureAuthentication(AuthenticationManagerBuilder builder, JwtAuthenticationProvider authenticationProvider) {
+        builder.authenticationProvider(authenticationProvider);
+    }
+
+    public JwtAuthenticationFilter jwtAuthenticationFilter() {
+        Jwt jwt = getApplicationContext().getBean(Jwt.class);
+        return new JwtAuthenticationFilter(jwtConfigure.getHeader(), jwt);
+    }
+
+    public SecurityContextRepository securityContextRepository() {
+        Jwt jwt = getApplicationContext().getBean(Jwt.class);
+        return new JwtSecurityContextRepository(jwtConfigure.getHeader(), jwt);
+    }
+
     @Override
     protected void configure(HttpSecurity http) throws Exception {
         http
                 .authorizeRequests()
-                .antMatchers("/me").hasAnyRole("USER", "ADMIN")
-                .antMatchers("/admin").access("isFullyAuthenticated() and hasRole('ADMIN')")
-                .anyRequest().permitAll()
+                  .antMatchers("/api/user/me").hasAnyRole("USER", "ADMIN")
+//                .antMatchers("/admin").access("isFullyAuthenticated() and hasRole('ADMIN')")
+                  .anyRequest().permitAll()
 //                  .accessDecisionManager(accessDecisionManager())
 //                  .expressionHandler(securityExpressionHandler())
                   .and()
-                .httpBasic()
-                  .and()
+                .csrf()
+                  .disable()
+                .headers()
+                  .disable()
                 .formLogin()
-                  .defaultSuccessUrl("/")
+                  .disable()
+//                .defaultSuccessUrl("/")
 //                  .loginPage("/my-login")
 //                  .usernameParameter("my-username")
 //                  .passwordParameter("my-password")
-                  .permitAll()
-                  .and()
+//                .permitAll()
+//                .and()
+                .httpBasic()
+                  .disable()
+
                 .rememberMe()
-                  .rememberMeParameter("remember-me") // 체크박스
-                  .tokenValiditySeconds(300)
-                  .and()
+                  .disable()
+//                  .rememberMeParameter("remember-me") // 체크박스
+//                  .tokenValiditySeconds(300)
+//                  .and()
                 .logout()
-                  .logoutRequestMatcher(new AntPathRequestMatcher("/logout"))
-                  .logoutSuccessUrl("/")
-                  .invalidateHttpSession(true)
-                  .clearAuthentication(true)
+                  .disable()
+//                  .logoutRequestMatcher(new AntPathRequestMatcher("/logout"))
+//                  .logoutSuccessUrl("/")
+//                  .invalidateHttpSession(true)
+//                  .clearAuthentication(true)
+//                  .and()
+                .sessionManagement()
+                  .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                   .and()
-                .requiresChannel()
+//                .requiresChannel()
 //                  .antMatchers("/api/**").requiresSecure();
-                  .anyRequest().requiresSecure()
+//                  .anyRequest().requiresSecure()
 //                  .and()
 //                .anonymous()
 //                  .principal("thisIsAnonymousUser")
 //                  .authorities("ROLE_ANONYMOUS", "ROLE_UNKNOWN")
-                  .and()
+//                  .and()
 //                .sessionManagement()
 //                .sessionFixation().changeSessionId()
 //                .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
@@ -107,6 +154,11 @@ public class WebSecurityConfigure extends WebSecurityConfigurerAdapter {
 //                .and()
                 .exceptionHandling()
                   .accessDeniedHandler(accessDeniedHandler())
+                  .and()
+                .securityContext()
+                  .securityContextRepository(securityContextRepository())
+                  .and()
+//                .addFilterAfter(jwtAuthenticationFilter(), SecurityContextHolderFilter.class)
         ;
     }
 
